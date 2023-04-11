@@ -24,7 +24,7 @@ export const PIXI_VIEWPORT = new InjectionToken<Viewport>('PIXI_VIEWPORT_TOKEN')
 					width: window.innerWidth,
 					height: window.innerHeight,
 					backgroundColor: 0x1099bb,
-					resizeTo: window
+					resizeTo: window,
 				});
 			}
 		},
@@ -37,11 +37,21 @@ export const PIXI_VIEWPORT = new InjectionToken<Viewport>('PIXI_VIEWPORT_TOKEN')
 				});
 
 				pixiApp.stage.addChild(viewport);
-
 				viewport
-					.drag()
+					.drag({
+						pressDrag: false,
+						wheel: false,
+						clampWheel: false,
+					})
 					.pinch()
-					.wheel()
+					.wheel({
+						wheelZoom: false,
+						interrupt: true,
+					})
+					.clampZoom({
+						minScale: 0.5,
+						maxScale: 2
+					})
 					.decelerate();
 
 				return viewport;
