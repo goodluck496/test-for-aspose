@@ -27,7 +27,9 @@
             "styles": [
               "src/styles.css"
             ],
-            "scripts": []
+            "scripts": [
+              "node_modules/pixi.js/dist/pixi.min.js"
+            ]
           },
           "configurations": {
             "production": {
@@ -63,7 +65,8 @@
               "browserTarget": "pixi-test:build:production"
             },
             "development": {
-              "browserTarget": "pixi-test:build:development"
+              "browserTarget": "pixi-test:build:development",
+              "port": 3000
             }
           },
           "defaultConfiguration": "development"
