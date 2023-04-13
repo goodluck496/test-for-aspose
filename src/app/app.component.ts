@@ -1,6 +1,6 @@
 import {AfterViewInit, Component, ElementRef, HostListener, Inject, OnInit, ViewChild} from '@angular/core';
 import * as PIXI from 'pixi.js';
-import {Sprite, Texture} from 'pixi.js';
+import {FederatedPointerEvent, FederatedWheelEvent, Sprite, Texture} from 'pixi.js';
 import {PIXI_APP, PIXI_VIEWPORT} from './app.module';
 import {Viewport} from 'pixi-viewport';
 import {BehaviorSubject, fromEvent} from 'rxjs';
@@ -24,6 +24,8 @@ export class AppComponent implements OnInit, AfterViewInit {
 	scaleStep = .2;
 	currentScale = 1;
 
+	reachBorderX = false;
+	reachBorderY = false;
 
 	constructor(
 		@Inject(PIXI_APP) private pixiApp: PIXI.Application,
@@ -41,11 +43,35 @@ export class AppComponent implements OnInit, AfterViewInit {
 
 	async ngOnInit() {
 		this.textures$.next(await this.getTextures());
+		this.initSubs();
 	}
 
 	getTextures(): Promise<PIXI.Texture[]> {
 		const names = ['1.png', '2.png', '3.png', '4.png', '5.png'];
 		return Promise.all(names.map(el => PIXI.Texture.fromURL(`assets/images/${el}`)));
+	}
+
+	initSubs(): void {
+		this.viewport.addEventListener('wheel', (event: FederatedWheelEvent) => {
+
+			if (event.ctrlKey) {
+				this.onZoom(event);
+				return;
+			}
+
+			if (event.shiftKey) {
+				this.onWheelX(event);
+				return;
+			}
+
+			this.onWheelY(event);
+		});
+
+		fromEvent(window, 'resize').subscribe(() => {
+			this.sprites$.getValue().forEach(sprite => {
+				sprite.position.set(window.innerWidth / 2 - sprite.texture.width / 2, sprite.position.y);
+			});
+		});
 	}
 
 	async renderTexture() {
@@ -68,18 +94,40 @@ export class AppComponent implements OnInit, AfterViewInit {
 					this.topTextureCoordinates = {x: positionX, y: positionY};
 				}
 				loadedSpite.position.set(positionX, positionY);
+				createdSprite.interactive = true;
+
+				createdSprite.addListener('click', (event: FederatedPointerEvent) => {
+					if (this.currentScale !== 1) {
+						console.log('Пока не получилось правильно вычислять позицию элемента при измененном масштабе, поэтому его не добавляем');
+						return;
+					}
+					if (!event.ctrlKey) {
+						return;
+					}
+					this.addAnnotate(createdSprite, event);
+				});
 				return loadedSpite;
 			});
 
+			this.pixiApp.stage.interactive = true;
 			this.sprites$.next(sprites);
 		});
 
-		fromEvent(window, 'resize').subscribe(() => {
-			this.sprites$.getValue().forEach(sprite => {
-				sprite.position.set(window.innerWidth / 2 - sprite.texture.width / 2, sprite.position.y);
-			});
-		});
+	}
 
+	addAnnotate(el: Sprite, event: FederatedPointerEvent): void {
+		const element = new PIXI.Graphics();
+
+		element.beginFill(0xffffff);
+		element.drawRect(0, 0, 250, 50);
+		element.endFill();
+
+		element.lineStyle(1, 0x000000);
+		element.drawRect(0, 0, element.width, element.height);
+		element.x = event.x - el.x - this.viewport.x;
+		element.y = event.y - el.y - this.viewport.y;
+
+		el.addChild(element);
 	}
 
 	ngAfterViewInit() {
@@ -91,54 +139,53 @@ export class AppComponent implements OnInit, AfterViewInit {
 		this.pixiApp.start();
 
 		this.renderTexture();
-
-		this.viewport.addEventListener('wheel', (event) => {
-
-			if (event.ctrlKey) {
-				const zoomPlus = event.deltaY < 0;
-				this.currentScale = zoomPlus ? this.currentScale + this.scaleStep : this.currentScale - this.scaleStep;
-				this.viewport.setZoom(this.currentScale, true);
-				return;
-			}
-
-			if (event.shiftKey) {
-				const stepX = 50;
-				const shiftPlus = event.deltaY < 0;
-				console.log(Math.abs(this.viewport.x), this.viewport.width, this.textures$.getValue()[0].width);
-				if (shiftPlus) {
-					if ((this.viewport.width / Math.abs(this.viewport.x)) > 1) {
-						this.viewport.x += stepX;
-					} else {
-						this.viewport.x = 0;
-					}
-
-				} else {
-
-					if ((this.viewport.width / Math.abs(this.viewport.x)) > 1) {
-						this.viewport.x -= stepX;
-					} else {
-						this.viewport.x = 0;
-					}
-				}
-				return;
-			}
-
-			const stepY = 100;
-			if (event.deltaY > 0) {
-				if (!(Math.abs(this.viewport.y - stepY) > this.viewport.height - this.textures$.getValue()[0].height / 1.5)) {
-					this.viewport.y -= stepY;
-				}
-			} else {
-				if (!(this.viewport.y + stepY > stepY)) {
-					this.viewport.y += stepY;
-				}
-			}
-		});
-
 	}
 
-	addImages(): void {
+	onZoom(event: FederatedWheelEvent): void {
+		const zoomPlus = event.deltaY < 0;
+		this.currentScale = zoomPlus ? this.currentScale + this.scaleStep : this.currentScale - this.scaleStep;
+		this.viewport.setZoom(this.currentScale, true);
+	}
 
+	onWheelX(event: FederatedWheelEvent): void {
+		const stepX = 50;
+		const shiftPlus = event.deltaY < 0;
+		if (shiftPlus) {
+			if ((this.viewport.width / Math.abs(this.viewport.x)) > 1) {
+				this.reachBorderX = false;
+				this.viewport.x += stepX;
+			} else {
+				this.reachBorderX = true;
+			}
+
+		} else {
+
+			if ((this.viewport.width / Math.abs(this.viewport.x)) > 1) {
+				this.reachBorderX = false;
+				this.viewport.x -= stepX;
+			} else {
+				this.reachBorderX = true;
+			}
+		}
+	}
+
+	onWheelY(event: FederatedWheelEvent): void {
+		const stepY = 100;
+		if (event.deltaY > 0) {
+			if (!(Math.abs(this.viewport.y - stepY) > this.viewport.height - this.textures$.getValue()[0].height / 1.5)) {
+				this.reachBorderY = false;
+				this.viewport.y -= stepY;
+			} else {
+				this.reachBorderY = true;
+			}
+		} else {
+			if (!(this.viewport.y + stepY > stepY)) {
+				this.reachBorderY = false;
+				this.viewport.y += stepY;
+			} else {
+				this.reachBorderY = true;
+			}
+		}
 	}
 
 }
