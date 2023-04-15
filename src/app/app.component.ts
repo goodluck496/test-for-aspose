@@ -4,6 +4,7 @@ import {FederatedPointerEvent, FederatedWheelEvent, Sprite, Texture} from 'pixi.
 import {PIXI_APP, PIXI_VIEWPORT} from './app.module';
 import {Viewport} from 'pixi-viewport';
 import {BehaviorSubject, fromEvent} from 'rxjs';
+import {Annotate} from './annotate';
 
 
 @Component({
@@ -20,12 +21,15 @@ export class AppComponent implements OnInit, AfterViewInit {
 
 	textures$ = new BehaviorSubject<Texture[]>([]);
 	sprites$ = new BehaviorSubject<Sprite[]>([]);
+	annotates: Annotate[] = [];
+
 
 	scaleStep = .2;
 	currentScale = 1;
 
 	reachBorderX = false;
 	reachBorderY = false;
+
 
 	constructor(
 		@Inject(PIXI_APP) private pixiApp: PIXI.Application,
@@ -75,8 +79,10 @@ export class AppComponent implements OnInit, AfterViewInit {
 	}
 
 	async renderTexture() {
+		const sprites: Sprite[] = [];
+
 		this.textures$.subscribe(textures => {
-			const sprites = textures.map((texture, i) => {
+			textures.forEach((texture, i) => {
 				const calcPositionY = () => {
 					const margintBottom = 20;
 					return textures.slice(0, i).reduce((acc, curr) => {
@@ -104,30 +110,18 @@ export class AppComponent implements OnInit, AfterViewInit {
 					if (!event.ctrlKey) {
 						return;
 					}
-					this.addAnnotate(createdSprite, event);
+					const annotate = new Annotate(this.viewport);
+					annotate.render(createdSprite, event);
+					this.annotates.push(annotate);
 				});
-				return loadedSpite;
+
+				sprites.push(createdSprite);
 			});
 
 			this.pixiApp.stage.interactive = true;
 			this.sprites$.next(sprites);
 		});
 
-	}
-
-	addAnnotate(el: Sprite, event: FederatedPointerEvent): void {
-		const element = new PIXI.Graphics();
-
-		element.beginFill(0xffffff);
-		element.drawRect(0, 0, 250, 50);
-		element.endFill();
-
-		element.lineStyle(1, 0x000000);
-		element.drawRect(0, 0, element.width, element.height);
-		element.x = event.x - el.x - this.viewport.x;
-		element.y = event.y - el.y - this.viewport.y;
-
-		el.addChild(element);
 	}
 
 	ngAfterViewInit() {
