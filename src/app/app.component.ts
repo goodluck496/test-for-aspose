@@ -1,10 +1,13 @@
 import {AfterViewInit, Component, ElementRef, HostListener, Inject, OnInit, ViewChild} from '@angular/core';
 import * as PIXI from 'pixi.js';
-import {FederatedPointerEvent, FederatedWheelEvent, Sprite, Texture} from 'pixi.js';
+import {FederatedWheelEvent, Texture} from 'pixi.js';
 import {PIXI_APP, PIXI_VIEWPORT} from './app.module';
 import {Viewport} from 'pixi-viewport';
-import {BehaviorSubject, fromEvent} from 'rxjs';
-import {Annotate} from './annotate';
+import {BehaviorSubject, forkJoin, fromEvent, switchMap, take} from 'rxjs';
+import {ApiService} from './api.service';
+import {ImagePage} from './app.types';
+import {ViewportService} from './viewport.service';
+import {DocPage} from './elements/doc-page';
 
 
 @Component({
@@ -17,12 +20,8 @@ export class AppComponent implements OnInit, AfterViewInit {
 
 	@ViewChild('pixiViewRef') pixiViewRef?: ElementRef<HTMLElement>;
 
-	topTextureCoordinates: { x: number; y: number } = {x: 0, y: 0};
-
 	textures$ = new BehaviorSubject<Texture[]>([]);
-	sprites$ = new BehaviorSubject<Sprite[]>([]);
-	annotates: Annotate[] = [];
-
+	pages$ = new BehaviorSubject<DocPage[]>([]);
 
 	scaleStep = .2;
 	currentScale = 1;
@@ -33,7 +32,9 @@ export class AppComponent implements OnInit, AfterViewInit {
 
 	constructor(
 		@Inject(PIXI_APP) private pixiApp: PIXI.Application,
-		@Inject(PIXI_VIEWPORT) private viewport: Viewport
+		@Inject(PIXI_VIEWPORT) private viewport: Viewport,
+		private apiService: ApiService,
+		private viewportService: ViewportService,
 	) {
 	}
 
@@ -46,20 +47,40 @@ export class AppComponent implements OnInit, AfterViewInit {
 	}
 
 	async ngOnInit() {
-		this.textures$.next(await this.getTextures());
-		this.initSubs();
+		this.apiService.loadPages().pipe(take(1), switchMap((pages: ImagePage[]) =>
+			forkJoin(pages.map(page => PIXI.Texture.fromURL(page.url)))
+		)).subscribe(data => {
+			this.initSubs();
+			this.renderPages();
+
+			this.textures$.next(data);
+		});
 	}
 
-	getTextures(): Promise<PIXI.Texture[]> {
-		const names = ['1.png', '2.png', '3.png', '4.png', '5.png'];
-		return Promise.all(names.map(el => PIXI.Texture.fromURL(`assets/images/${el}`)));
+	@HostListener('window:keydown', ['$event'])
+	onKeydown(e: KeyboardEvent) {
+		if (e.ctrlKey && e.code === 'NumpadAdd') {
+			e.preventDefault();
+			this.onZoom('in');
+		}
+
+		if (e.ctrlKey && e.code === 'NumpadSubtract') {
+			e.preventDefault();
+			this.onZoom('out');
+		}
+
+		if (e.ctrlKey && ['digit0', 'numpad0'].includes(e.code.toLowerCase())) {
+			this.currentScale = 1;
+			this.onZoom('reset');
+		}
 	}
 
 	initSubs(): void {
 		this.viewport.addEventListener('wheel', (event: FederatedWheelEvent) => {
 
 			if (event.ctrlKey) {
-				this.onZoom(event);
+				let zoomPlus = event.deltaY < 0;
+				this.onZoom(zoomPlus ? 'in' : 'out');
 				return;
 			}
 
@@ -72,72 +93,59 @@ export class AppComponent implements OnInit, AfterViewInit {
 		});
 
 		fromEvent(window, 'resize').subscribe(() => {
-			this.sprites$.getValue().forEach(sprite => {
-				sprite.position.set(window.innerWidth / 2 - sprite.texture.width / 2, sprite.position.y);
+			this.pages$.getValue().forEach(page => {
+				page.element.position.set(window.innerWidth / 2 - page.element.texture.width / 2, page.element.position.y);
 			});
 		});
+
 	}
 
-	async renderTexture() {
-		const sprites: Sprite[] = [];
+	async renderPages() {
+		const calcPositionY = (textures: PIXI.Texture[], i: number) => {
+			const margintBottom = 20;
+			return textures.slice(0, i).reduce((acc, curr) => {
+				acc += curr.height + margintBottom;
+				return acc;
+			}, 0);
+		};
 
 		this.textures$.subscribe(textures => {
+			const pages: DocPage[] = [];
+			this.pages$.getValue().forEach(el => el.destroy());
+			this.pages$.next([]);
+
 			textures.forEach((texture, i) => {
-				const calcPositionY = () => {
-					const margintBottom = 20;
-					return textures.slice(0, i).reduce((acc, curr) => {
-						acc += curr.height + margintBottom;
-						return acc;
-					}, 0);
-				};
 
+				const page = new DocPage(texture, this.viewport, this.viewportService);
+				const positionY = i === 0 ? 0 : calcPositionY(textures, i);
 				const positionX = window.innerWidth / 2 - texture.width / 2;
-
-				const createdSprite = new PIXI.Sprite(texture);
-				const loadedSpite = this.viewport.addChild(createdSprite);
-				const positionY = i === 0 ? 0 : calcPositionY();
-				if (i === 0) {
-					this.topTextureCoordinates = {x: positionX, y: positionY};
-				}
-				loadedSpite.position.set(positionX, positionY);
-				createdSprite.interactive = true;
-
-				createdSprite.addListener('click', (event: FederatedPointerEvent) => {
-					if (this.currentScale !== 1) {
-						console.log('Пока не получилось правильно вычислять позицию элемента при измененном масштабе, поэтому его не добавляем');
-						return;
-					}
-					if (!event.ctrlKey) {
-						return;
-					}
-					const annotate = new Annotate(this.viewport);
-					annotate.render(createdSprite, event);
-					this.annotates.push(annotate);
-				});
-
-				sprites.push(createdSprite);
+				page.element.position.set(positionX, positionY);
+				pages.push(page);
 			});
-
-			this.pixiApp.stage.interactive = true;
-			this.sprites$.next(sprites);
+			this.pages$.next(pages);
 		});
-
 	}
 
 	ngAfterViewInit() {
+		this.initPixi();
+	}
 
+	initPixi(): void {
 		const canvasContainer = this.pixiApp.view;
 		// @ts-ignore
 		this.pixiViewRef?.nativeElement.appendChild(canvasContainer);
 
 		this.pixiApp.start();
-
-		this.renderTexture();
+		this.pixiApp.stage.interactive = true;
 	}
 
-	onZoom(event: FederatedWheelEvent): void {
-		const zoomPlus = event.deltaY < 0;
-		this.currentScale = zoomPlus ? this.currentScale + this.scaleStep : this.currentScale - this.scaleStep;
+	onZoom(type: 'in' | 'out' | 'reset'): void {
+		if (type === 'reset') {
+			this.currentScale = 1;
+			this.viewport.setZoom(this.currentScale, true);
+			return;
+		}
+		this.currentScale = type === 'in' ? this.currentScale + this.scaleStep : this.currentScale - this.scaleStep;
 		this.viewport.setZoom(this.currentScale, true);
 	}
 

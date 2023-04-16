@@ -5,6 +5,8 @@ import {AppComponent} from './app.component';
 import * as PIXI from 'pixi.js';
 import {Application} from 'pixi.js';
 import {Viewport} from 'pixi-viewport';
+import {ApiService} from './api.service';
+import {ViewportService} from './viewport.service';
 
 export const PIXI_APP = new InjectionToken<Application>('PIXI_APP_TOKEN');
 
@@ -57,7 +59,9 @@ export const PIXI_VIEWPORT = new InjectionToken<Viewport>('PIXI_VIEWPORT_TOKEN')
 				return viewport;
 
 			}, deps: [PIXI_APP]
-		}
+		},
+		ApiService,
+		ViewportService,
 	],
 	bootstrap: [AppComponent]
 })
